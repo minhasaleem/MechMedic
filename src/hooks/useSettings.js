@@ -1,36 +1,26 @@
 import { useEffect, useState } from "react";
 import { defaultSettings } from "../data/config";
 import { loadSettings, saveSettings } from "../services/settings";
-export function useSettings(userId, mode) {
+export function useSettings(userId) {
   const [settings, setSettings] = useState(() =>
       structuredClone(defaultSettings),
     ),
-    [error, setError] = useState(""),
     [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let active = true;
-    setSettings(structuredClone(defaultSettings));
-    setError("");
-    setLoaded(false);
-    loadSettings(userId, mode)
-      .then((v) => {
-        if (active) setSettings(v);
-      })
-      .catch(() => {
-        if (active)
-          setError("Saved settings could not be loaded. Limits are unset.");
-      })
-      .finally(() => {
-        if (active) setLoaded(true);
-      });
+    loadSettings(userId).then((v) => {
+      if (active) {
+        setSettings(v);
+        setLoaded(true);
+      }
+    });
     return () => {
       active = false;
     };
-  }, [userId, mode]);
+  }, [userId]);
   async function save(value) {
-    const result = await saveSettings(userId, mode, value);
-    setSettings(result || value);
-    setError("");
+    await saveSettings(userId, null, value);
+    setSettings(value);
   }
-  return { settings, error, save, loaded };
+  return { settings, save, loaded, error: "" };
 }

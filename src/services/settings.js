@@ -1,65 +1,79 @@
-import { defaultSettings, measurements } from "../data/config";
-import { request } from "./http";
-function key(userId) {
-  return `mechmedic.settings.${userId}`;
-}
+import { defaultSettings, FEATURE_KEYS } from "../data/config.js";
+
 export function validateSettings(value) {
   if (
-    !value?.thresholds ||
-    !value.alerts ||
-    !value.notifications ||
-    !value.dashboard
+    !value?.connection ||
+    !value.health ||
+    !value.model ||
+    !Array.isArray(value.parameters)
   )
-    throw new Error("Incomplete settings response.");
-  for (const [group, keys] of [
-    ["alerts", ["warning", "critical"]],
-    ["notifications", ["email", "sms", "whatsapp"]],
-    ["dashboard", ["compact", "symbolicEffect"]],
-  ])
-    for (const key of keys)
-      if (typeof value[group][key] !== "boolean")
-        throw new Error("Invalid settings preference.");
+    throw new Error("Invalid configuration.");
+
+  const url = new URL(value.connection.apiBase);
   if (
-    ![
-      "home",
-      "sensors",
-      "health",
-      "twin",
-      "alerts",
-      "maintenance",
-      "analytics",
-    ].includes(value.dashboard.defaultPage)
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password
   )
-    throw new Error("Invalid preferred page.");
-  for (const m of measurements) {
-    const t = value.thresholds[m.key];
-    for (const n of [t.warningHigh, t.criticalHigh])
-      if (n != null && !Number.isFinite(n))
-        throw new Error(`${m.name}: enter valid numeric limits.`);
-    if (
-      t.warningHigh != null &&
-      t.criticalHigh != null &&
-      t.warningHigh >= t.criticalHigh
-    )
-      throw new Error(`${m.name}: critical must be greater than warning.`);
+    throw new Error("Use an HTTP(S) backend URL without credentials.");
+
+  if (value.connection.wsUrl) {
+    const ws = new URL(value.connection.wsUrl);
+    if (!["ws:", "wss:"].includes(ws.protocol) || ws.username || ws.password)
+      throw new Error("Use a WS(S) URL without credentials.");
   }
+
+  if (
+    !Number.isInteger(value.connection.pollMs) ||
+    value.connection.pollMs < 1000 ||
+    value.connection.pollMs > 60000
+  )
+    throw new Error("Update interval must be 1000–60000 milliseconds.");
+
+  const { healthyMin, warningMin } = value.health;
+  if ((healthyMin === null) !== (warningMin === null))
+    throw new Error("Set both health bands, or leave both unset.");
+
+  if (
+    healthyMin !== null &&
+    (!Number.isFinite(healthyMin) ||
+      !Number.isFinite(warningMin) ||
+      warningMin < 0 ||
+      healthyMin > 100 ||
+      warningMin >= healthyMin)
+  )
+    throw new Error("Health bands must satisfy 0 ≤ amber < green ≤ 100.");
+
+  if (
+    typeof value.model.enabled !== "boolean" ||
+    typeof value.alerts?.showAcknowledged !== "boolean" ||
+    typeof value.dashboard?.compact !== "boolean"
+  )
+    throw new Error("Invalid monitoring preferences.");
+
+  if (
+    !value.parameters.length ||
+    value.parameters.some((k) => !FEATURE_KEYS.includes(k))
+  )
+    throw new Error("Select at least one supported parameter.");
   return value;
 }
-export async function loadSettings(userId, mode) {
-  if (mode === "live") return validateSettings(await request("/api/settings"));
+
+const key = (id) => `mechmedic.settings.v3.${id}`;
+
+export async function loadSettings(id) {
   try {
     return validateSettings(
-      JSON.parse(localStorage.getItem(key(userId))) ||
+      JSON.parse(localStorage.getItem(key(id))) ||
         structuredClone(defaultSettings),
     );
   } catch {
     return structuredClone(defaultSettings);
   }
 }
-export async function saveSettings(userId, mode, value) {
+
+export async function saveSettings(id, _mode, value) {
   validateSettings(value);
-  if (mode === "live")
-    return request("/api/settings", { method: "PUT", body: value });
-  localStorage.setItem(key(userId), JSON.stringify(value));
+  localStorage.setItem(key(id), JSON.stringify(value));
   return value;
 }

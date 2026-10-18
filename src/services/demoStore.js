@@ -1,16 +1,37 @@
-import { createDemoRecords } from "../data/demo";
-const storageKey = (id) => `mechmedic.demo.records.${id}`;
-export function readDemoRecords(userId) {
+// User-entered records are separated by source; old seeded examples are excluded.
+
+export function readDemoRecords(userId, source = "demo") {
   try {
-    const stored = JSON.parse(localStorage.getItem(storageKey(userId)));
-    if (stored?.alerts && stored?.maintenance) return stored;
+    const key = `mechmedic.records.v3.${userId}.${source}`;
+    const saved = JSON.parse(localStorage.getItem(key));
+    if (saved && Array.isArray(saved.maintenance)) return saved;
+
+    if (source === "demo") {
+      const legacy = JSON.parse(
+        localStorage.getItem(`mechmedic.demo.records.${userId}`),
+      );
+      if (Array.isArray(legacy?.maintenance)) {
+        const migrated = {
+          maintenance: legacy.maintenance
+            .filter((r) => !r.id.startsWith("demo-record-"))
+            .map(({ condition: _condition, ...r }) => ({
+              ...r,
+              status: r.status || "Recorded",
+            })),
+        };
+        writeDemoRecords(userId, migrated, source);
+        return migrated;
+      }
+    }
   } catch {
-    /* reset malformed local demo state */
+    /* Unavailable storage or invalid saved records. */
   }
-  const records = createDemoRecords();
-  writeDemoRecords(userId, records);
-  return records;
+  return { maintenance: [] };
 }
-export function writeDemoRecords(userId, records) {
-  localStorage.setItem(storageKey(userId), JSON.stringify(records));
+
+export function writeDemoRecords(userId, records, source = "demo") {
+  localStorage.setItem(
+    `mechmedic.records.v3.${userId}.${source}`,
+    JSON.stringify(records),
+  );
 }

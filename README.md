@@ -1,142 +1,94 @@
 # MechMedic
 
-**Keeping Machines One Step Ahead**
+Keeping Machines One Step Ahead
 
-The existing `lab-monitor` React/Vite frontend was revised in place for laboratory staff. It retains the shared dark theme, Recharts trends, UI primitives and central data integration. It does not render workflow explanations, academic content or the equipment photograph.
+Existing React/Vite dashboard updated in place for the Computer-Based Single-Cylinder Four-Stroke Diesel Engine Test Rig. Dark navy/teal styling, authentication, sidebar and eight routes are retained.
 
 ## Run
 
-```powershell
-cd E:\mca\S3\MINIPROJECT\lab-monitor
+From `E:/mca/S3/MINIPROJECT/lab-monitor`:
+
+```sh
 npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:5176. Requires Node.js 22.12+ or a newer supported release. `npm run build` produces `dist/`; `npm run preview` previews it. `npm test` runs the data-contract checks.
+Open http://127.0.0.1:5176/#login and keep the development terminal running. Use **Use demo credentials**, then **Sign In**. If port 5176 is already in use, the existing server may already be running; do not start another copy. `npm run build` creates `dist`; `npm run preview` previews the production build.
 
-On the Login page, select **Use demo credentials**, then **Sign In**. The public preview account is `staff@mechmedic.demo` / `MechMedicDemo!`. Alternatively, register a browser-local demo account. These are demonstration credentials, not a real laboratory account.
+Demo login is a frontend demonstration, not production access control. Set `VITE_AUTH_MODE=backend` and implement the existing auth service endpoints and protected server APIs for real deployment.
 
-## Routes
+## Pages
 
-Public: `#login`, `#register`, `#forgot-password`.
+- `#home`: equipment identity, four summary cards. No charts or equipment visualization.
+- `#sensors`: grouped parameter cards, sparklines and selectable comparisons separated by unit.
+- `#health`: backend Isolation Forest score, threshold, decision, optional score-derived indicator and histories. Maintenance prediction remains unavailable.
+- `#twin`: interactive simplified rig with numbered installation markers, rotate, zoom, reset and component details.
+- `#alerts`: model anomalies, details, filtering and browser-local staff acknowledgement. No confirmed mechanical fault labels.
+- `#maintenance`: manual records, search/type filter, details, manual acknowledgement/completion, PDF export. CSV/demo records are browser-local; live records use the backend.
+- `#analytics`: selected rows, reading-index/time filters, sensor trends, histograms, Pearson correlation and model-result analysis.
+- `#settings`: source/connection, model endpoint enablement, visible parameters, optional project-defined health bands, alert visibility, density and profile.
 
-Authenticated: `#home`, `#sensors`, `#health`, `#twin`, `#alerts`, `#maintenance`, `#analytics`, `#settings`.
+## Dataset mapping
 
-The dashboard is not mounted until a session exists. Successful login opens Home. Unauthenticated deep links show Login. Logout removes the session. Remember me uses a seven-day local demo session; otherwise the session is tab-local and expires after one day. Opening the root URL with an existing session uses the preferred starting page from Settings.
+| Keys | Units |
+|---|---|
+| speed_rpm | RPM |
+| vib_rms_g, vib_peak_g, vib_firing_band_g, vib_hf_band_g | g |
+| vib_kurtosis | dimensionless |
+| temp_coolant_C, temp_oil_C, temp_block_C, temp_ambient_C | degrees Celsius |
+| current_A | A |
 
-## Authentication boundary
+`src/data/config.js` is the canonical ordered feature list. `src/services/dataset.js` parses CSV and retains only these numerical features plus reading index/valid timestamp metadata. **condition is discarded**; it never becomes a model input, target, prediction or health assessment. This frontend performs no training. Any future backend training pipeline must independently enforce the same whitelist and exclude condition as a target.
 
-The default `VITE_AUTH_MODE=demo` is a frontend UX simulation. Accounts and sessions are browser-local and **do not provide secure access control**. Registration stores a salted PBKDF2 password hash rather than a plaintext password. It is still not production authentication. Forgot password explicitly states that no reset email is sent in demo mode.
+The two supplied CSV files are copied unchanged from `../lab-sensor/data_set/` to `public/datasets/`. Neither has timestamps, so charts use 1-based CSV reading indices. Missing/invalid values remain null; incomplete rows are not submitted to the model. Uploads accept up to 10 MB / 50,000 readings. Demo signals live only in `src/data/demo.js`; no synthetic model predictions or alerts are supplied.
 
-To integrate secure authentication, set `VITE_AUTH_MODE=backend`. `src/services/auth.js` calls:
+## Isolation Forest integration
 
-- `GET /api/auth/session` -> `{ user: { id, name, email } }` or `{ user: null }`
-- `POST /api/auth/login` with `{ email, password, remember }` -> `{ user }`
-- `POST /api/auth/register` with `{ name, email, password }`
-- `POST /api/auth/logout`
-- `POST /api/auth/forgot-password` with `{ email }`
-- `PATCH /api/auth/profile` with `{ name, email }` -> `{ user }`
+No trained Isolation Forest artifact and matching preprocessing pipeline were found in this project. Existing notebooks do not constitute a connected inference service. The UI therefore reports **Model not connected**, **Unknown**, and **Not available**. Old simulated Random Forest classes and LSTM estimates were removed.
 
-Use secure HttpOnly server session cookies, authorization for every monitoring API and WebSocket connection, CSRF protection, and server-side validation. The shared HTTP client uses `credentials: include`; configure CORS for the exact frontend origin with credential support. The browser route guard is not a substitute for backend authorization. Authentication/data API contracts are proposed integration interfaces, not existing backend functionality.
+Enable model integration in Settings only when the backend is available. `src/services/model.js` posts to `${apiBase}/api/model/predict`:
 
-## Structure and retained components
-
-```
-src/
-  App.jsx                       Authenticated shell and eight staff routes
-  main.jsx                      React entry point
-  styles.css                    Retained dark theme plus staff/auth/responsive styles
-  context/AuthContext.jsx       Session initialization, login/logout and profile state
-  components/
-    ui.jsx                      Shared icons, panels, badges, brand and accessible dialog
-    Sidebar.jsx                 Eight-section staff navigation
-    SensorCard.jsx              Reusable single measurement, units, status and timestamp
-    Trends.jsx                  Retained Recharts sensor tabs and time ranges
-    Predictions.jsx             Separate RF classification and LSTM gauge
-    HistoryChart.jsx            Shared line/bar historical charts
-    DigitalTwin.jsx             Three.js lifecycle, controls, health and asset loading
-    rigModel.js                 Simplified diesel test-rig assembly and inspectable parts
-    Records.jsx                 Alert feed, filters and acknowledgement
-  pages/
-    AuthPage.jsx                Login/register/password-reset views
-    HealthPage.jsx              Health gauge, trend and maintenance estimate
-    MaintenancePage.jsx         Search/filter/add/view/PDF workflow
-    AnalyticsPage.jsx           Seven historical charts and time filters
-    SettingsPage.jsx            Limits, preferences, notifications and profile
-  data/
-    config.js                   Units, equipment, cadence, health bands and empty limits
-    demo.js                     ALL synthetic readings/model scenarios/history/seed records
-  services/
-    http.js                     Shared timed, credentialed HTTP requests
-    api.js                      Monitoring REST and reconnecting native WebSocket adapters
-    auth.js                     Demo/backend authentication adapter
-    settings.js                 Central validation and demo/backend settings persistence
-    demoStore.js                Per-user demo alert/maintenance persistence
-    validation.js               Incoming data contract validation
-    reports.js                  Lazy-loaded jsPDF maintenance-report generation
-  hooks/
-    useMonitoring.js            Shared polling/subscription lifecycle and write actions
-    useSettings.js              Settings load/save lifecycle
+```json
+{"dataset_id":"opaque-content-id","features":["the 11 ordered keys from config.js"],"rows":[{"reading_index":1,"values":["11 finite numbers in that order"]}]}
 ```
 
-Removed: `components/Workflow.jsx`, `components/EquipmentView.jsx`, the workflow route, the photo display and the academic ML explanation page. The original photograph remains in `public/equipment.png` only as an unused reference asset; no application component displays it.
+The response must echo dataset_id and return `results`. Each result requires:
 
-## Data source and demo behaviour
-
-`src/data/demo.js` is the only synthetic telemetry/model fixture generator. It produces deterministic curves and explicit Healthy, Warning and Critical demonstration scenarios. It does not implement or pretend to train an LSTM. The interface labels the entire demo workspace, model outputs and example records as synthetic. Switching to Live backend clears the demo values.
-
-`src/services/demoStore.js` persists acknowledgement and maintenance changes separately per local demo user. `src/services/settings.js` persists that user's configuration. Browser-local records are not shared between laboratory staff and are not a production database.
-
-`POLL_MS` in `src/data/config.js` is the one central five-second update interval. The stale display policy is four intervals; it is not an equipment fault threshold. The actual ADXL345 acquisition frequency is separate from dashboard delivery. Components never create their own random readings.
-
-## Monitoring integration
-
-Copy `.env.example` to `.env` and set `VITE_API_BASE_URL`, optional `VITE_WS_URL`, and `VITE_AUTH_MODE`. Restart Vite after changing environment values. Never place secrets in VITE variables.
-
-The five sensor keys are `vibration_x`, `vibration_y`, `vibration_z` (g), `temperature` (degrees Celsius), and `current` (A). Every reading requires an ISO timestamp with timezone and five finite numeric values.
-
-- `GET /api/latest` -> one reading.
-- `GET /api/history` -> array of readings, preferably at least one hour.
-- `GET /api/health` -> `null` or `{ timestamp, fault_class, health_score, maintenance_hours }`; unavailable individual outputs may be null. `fault_class`: 0 Normal, 1 Minor Fault, 2 Moderate Fault, 3 Severe Fault. `health_score`: 0–100. `maintenance_hours`: nonnegative estimate.
-- `GET /api/health-history` -> `[{ timestamp, health_score }]`.
-- `GET /api/classification-history` -> `[{ timestamp, fault_class }]`.
-- `GET /api/alerts` -> array of `{ id, timestamp, severity, source, message, condition, acknowledged, acknowledged_by?, acknowledged_at? }`.
-- `POST /api/alerts/:id/acknowledge` -> updated alert record. The backend derives the acknowledging user from the authenticated session.
-- `GET /api/maintenance` -> array of `{ id, timestamp, type, message, condition, technician, notes }`.
-- `POST /api/maintenance` with the record fields except id -> saved record, including id.
-- `GET /api/analytics?from=<ISO>&to=<ISO>` -> `{ history, healthHistory, classificationHistory, alerts, maintenance }`, using the record shapes above.
-- `GET /api/settings` and `PUT /api/settings` -> the shape of `defaultSettings` in `config.js`.
-
-All writes show errors and wait for the backend response; live actions are not silently redirected to local demo storage. The guide names latest, health and alerts endpoints. Additional routes and exact response schemas are frontend integration proposals for the future backend.
-
-Native WebSocket messages:
-
-```
-{ "type": "reading", "data": Reading }
-{ "type": "prediction", "data": Prediction }
-{ "type": "alert", "data": Alert }
+```json
+{"algorithm":"IsolationForest","model_version":"your-version","reading_index":1,"status":"normal","anomaly_score":0.12,"decision_threshold":0,"health_indicator":null,"health_mapping":null}
 ```
 
-The adapter validates messages, appends sensor history, updates model state and accepts alert events. It reconnects at the central cadence and keeps REST polling as fallback. Socket.IO needs a protocol-specific replacement adapter. The data layer retains explicit disconnected/stale states; unavailable model results are not inferred to be Normal. Historical analytics never substitute synthetic results while in live mode.
+This is a schema example, not an equipment prediction. `status` is `normal` or `anomaly`; the backend must interpret its own score convention. Numeric score and threshold are mandatory. Optional health_indicator must be 0–100 and accompanied by a documented health_mapping string. The frontend never invents the transformation. Backend preprocessing must exactly match training: feature ordering, scaling and feature definitions. Return only indices sent in the request; mismatched/duplicate responses are rejected.
 
-## Health, limits and notifications
+Health colour bands are optional, unset initially, and explicitly project-defined. They are display bands, not validated fault severity. No ML accuracy/confidence is asserted. Future maintenance/LSTM integration needs its own validated model, inputs and prediction contract; there is no RUL calculation in this UI.
 
-Health bands follow the revised guide: 70–100 Healthy, 40–69 Degrading/Warning, below 40 Critical. Health scores and maintenance windows come from the LSTM response (or an explicitly labelled demo fixture). The frontend never computes a real health score or displays invented accuracy/confidence. Maintenance hours are an estimated maintenance window, not a proven remaining equipment lifespan.
+## Live integration
 
-Sensor upper limits start unset. Staff can enter warning and critical limits in Settings; critical must be above warning when both are supplied. These limits only affect measurement badges and the saved configuration. They do not alter Random Forest output, calculate LSTM results or send notifications. The backend owns alert rules and Twilio/email delivery. Home alert preferences affect the Home feed; the full Alert Feed retains all alerts. Notification checkboxes store requested channels but do not claim successful delivery.
+`src/services/api.js` handles GET `/api/monitoring` and native WebSocket messages. Both accept complete history snapshots:
 
-## 3D equipment representation
+```json
+{"readings":[{"reading_index":1,"timestamp":"2026-10-17T10:00:00Z","speed_rpm":null,"current_A":null}],"physical":{"timestamp":"2026-10-17T10:00:00Z","temp_c":null,"ax_m_s2":null,"ay_m_s2":null,"az_m_s2":null,"current_dc_a":null,"current_rms_a":null,"adc_clipped":0}}
+```
 
-The interactive Three.js view uses simplified geometry resembling the supplied rig: instrument cabinet, single-cylinder engine, flywheel, dynamometer/generator, exhaust and frame. It is labelled as a simplified representation, not an exact replica. Health colour follows the displayed LSTM score; a stale result uses a neutral state. Critical cone/flame-like markers are explicitly symbolic and do not mean physical fire has been detected. There is no fire sensor in the UI.
+Use real ISO timestamps only when available and stable unique reading indices. Missing fields stay unavailable. Physical keys follow the existing ESP32-C6 firmware/logger; acceleration is m/s², temperature °C and current A. Clipped ADC current is unavailable. The backend bridge must establish calibration, freshness and provenance. Dataset current_A is not automatically aliased to DC or RMS current; derived vibration features and temperature locations require a verified feature pipeline.
 
-Rotate by dragging or using the Rotate button; zoom by wheel/pinch or buttons. Click geometry or an inspection button to inspect a part. Reset restores the camera. Normal operation renders on interaction/data/resize; only the critical symbolic effect uses a capped animation loop. Reduced-motion preference disables its motion. WebGL failure has a visible fallback message, never a photograph filler.
+Polling defaults to 5 seconds, configured centrally and adjustable in Settings. Optional WebSocket URL uses native WebSocket, not Socket.IO. Disconnections/stale timestamps are indicated; the UI does not generate replacement live data. Configure backend CORS and authenticated sessions appropriately.
 
-Set `VITE_EQUIPMENT_MODEL_URL` to a future GLB/GLTF asset to replace the approximate model. The loader normalizes scale. For component picking, tag mesh `userData.part` with keys from `rigParts` (`engine`, `generator`, `panel`, `exhaust`, `frame`). This future accurate asset still needs validation against the physical equipment.
+## Installation visualization
 
-## Maintenance PDF
+`src/components/rigModel.js` retains the simplified green vertical engine, left blue/silver panel, blue cylindrical coupling, right grey dynamometer, black base and far-right blue enclosure. `markerDefinitions` in config.js defines:
 
-`src/services/reports.js` exports the currently filtered records to a landscape report with MechMedic branding, generation time, filter, staff name, all maintenance fields, repeating table headers, page numbers and a demo watermark/footer when appropriate. It supports wrapped text and multiple pages. The current PDF font uses Latin text; non-ASCII characters are replaced with `?`. Embed a licensed Unicode font for multilingual production records. No export endpoint is needed for this frontend implementation; replace this service for signed/server-generated reports later.
+1. DS18B20 near the upper head, highest engine marker; only raw temp_c can be shown.
+2. ADXL345 on the mid/lower side below DS18B20; raw XYZ acceleration only, not unsupported derived feature aliases.
+3. ESP32-C6 below ADXL345 near the support; data collection role, no measurement.
+4. ACS712 on the far-right enclosure; current circuit location without internal wiring claims.
 
-## Verification
+CSV/demo markers show no physical readings. Marker buttons support keyboard inspection; markers can also be clicked on the model. The model is not a validated physics-based twin. Accurate replacement requires dimensions, front/side/rear views and mounting close-ups. `VITE_EQUIPMENT_MODEL_URL` supports a GLB/GLTF replacement; calibrate marker positions against its geometry before use.
 
-`tests/contracts.test.js` tests cadence, the five-field schema, health bands, invalid response rejection, thresholds and analytics ranges. `tests/browser-check.mjs` covers the staff journeys using an isolated browser profile. It uses Playwright (install separately or provide its module URL in `PLAYWRIGHT_MODULE`) and installed Edge by default. Start the dev server first, then run `node tests/browser-check.mjs`. `BROWSER_CHANNEL` can override Edge. QA fixtures are not actual laboratory records. See `QA.md` for completed checks and limitations.
+## Storage, reports and checks
+
+`useMonitoring` coordinates source state, model results, generated anomaly alerts and maintenance. Source changes remount this scope so readings/results do not leak across modes. `services/settings.js` stores per-account browser preferences. `services/demoStore.js` keeps manual CSV/demo maintenance separate and migrates prior user-entered demo records while excluding old seeded examples. Acknowledgements are per-account, browser-local, dataset/model/reading scoped; a shared lab deployment needs server acknowledgement persistence.
+
+Live maintenance uses GET/POST `/api/maintenance` and PATCH `/api/maintenance/:id` with `{status}`. Records require id, timestamp, type, message, status (Recorded/Acknowledged/Completed), technician and notes. `services/reports.js` produces a printable PDF using manual records only.
+
+Run `npm test` for data/model/configuration contracts and `npm run build`. Browser interaction checks live in `tests/browser-check.mjs` and use Playwright with Edge; `PLAYWRIGHT_MODULE` can point to a local Playwright installation. QA inference responses in that test are test-only and never part of demo/application data.

@@ -1,212 +1,220 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { Trends } from "../components/Trends";
 import { HistoryChart } from "../components/HistoryChart";
-import { Badge, Icon } from "../components/ui";
-import { sensors } from "../data/config";
-import { createDemoAnalytics } from "../data/demo";
-import { loadAnalytics } from "../services/api";
-function bounds(range, start, end) {
-  const now = Date.now(),
-    today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (range === "recent") return [now - 3600000, now];
-  if (range === "today") return [+today, now];
-  if (range === "custom")
-    return [
-      new Date(`${start}T00:00:00`).getTime(),
-      new Date(`${end}T23:59:59.999`).getTime(),
-    ];
-  return [+today - (range === "7" ? 6 : 29) * 86400000, now];
-}
-function frequencies(records, from, to) {
-  const counts = new Map();
-  records
-    .filter(
-      (r) => Date.parse(r.timestamp) >= from && Date.parse(r.timestamp) <= to,
-    )
-    .forEach((r) => {
-      const date = new Date(r.timestamp);
-      date.setHours(0, 0, 0, 0);
-      const key = date.toISOString();
-      counts.set(key, (counts.get(key) || 0) + 1);
+import { Panel, Badge } from "../components/ui";
+import { measurements } from "../data/config";
+import { histogram, correlation } from "../services/analytics";
+export default function AnalyticsPage({ data }) {
+  const [parameter, setParameter] = useState("vib_rms_g"),
+    [range, setRange] = useState("all"),
+    [from, setFrom] = useState(""),
+    [to, setTo] = useState("");
+  const timed = data.rows.length > 0 && data.rows.every((r) => r.timestamp);
+  const filtered = useMemo(() => {
+    if (range === "recent") return data.rows.slice(-100);
+    if (range !== "custom") return data.rows;
+    return data.rows.filter((r) => {
+      const n = timed ? Date.parse(r.timestamp) : r.reading_index;
+      const low = from ? (timed ? Date.parse(from) : Number(from)) : -Infinity,
+        high = to ? (timed ? Date.parse(to) : Number(to)) : Infinity;
+      return n >= low && n <= high;
     });
-  return [...counts]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([timestamp, count]) => ({ timestamp, count }));
-}
-const empty = {
-  history: [],
-  healthHistory: [],
-  classificationHistory: [],
-  alerts: [],
-  maintenance: [],
-};
-export default function AnalyticsPage({ mode, scenario, records }) {
-  const [range, setRange] = useState("recent"),
-    [start, setStart] = useState(
-      new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10),
-    ),
-    [end, setEnd] = useState(new Date().toISOString().slice(0, 10)),
-    [refresh, setRefresh] = useState(0),
-    [result, setResult] = useState(empty),
-    [error, setError] = useState(""),
-    [loading, setLoading] = useState(false);
-  const [from, to] = useMemo(
-    () => bounds(range, start, end),
-    [range, start, end, refresh],
+  }, [data.rows, range, from, to, timed]);
+  const ids = new Set(filtered.map((r) => r.reading_index));
+  const results = data.results.filter((r) => ids.has(r.reading_index));
+  const m = measurements.find((v) => v.key === parameter);
+  const matrix = useMemo(
+    () =>
+      measurements.map((a) =>
+        measurements.map((b) => correlation(filtered, a.key, b.key)),
+      ),
+    [filtered],
   );
-  useEffect(() => {
-    setError("");
-    setResult(empty);
-    if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) {
-      setError(
-        "Choose a valid date range; the end must not precede the start.",
-      );
-      return;
-    }
-    if (mode === "demo") {
-      setResult(createDemoAnalytics(from, to, scenario));
-      setLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    setLoading(true);
-    loadAnalytics(from, to, controller.signal)
-      .then(setResult)
-      .catch((err) => {
-        if (!controller.signal.aborted)
-          setError(`Analytics unavailable: ${err.message}`);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [mode, scenario, from, to]);
-  const alertCounts = frequencies(
-      mode === "demo" ? records.alerts : result.alerts,
-      from,
-      to,
-    ),
-    maintenanceCounts = frequencies(
-      mode === "demo" ? records.maintenance : result.maintenance,
-      from,
-      to,
-    );
+  const history = results.map((r) => ({
+    ...r,
+    timestamp: filtered.find((row) => row.reading_index === r.reading_index)
+      ?.timestamp,
+    anomalous: r.status === "anomaly" ? 1 : 0,
+  }));
   return (
     <>
       <div className="analytics-toolbar">
-        <div className="filter-pills" aria-label="Analytics time range">
-          {[
-            ["recent", "Recent"],
-            ["today", "Today"],
-            ["7", "7 days"],
-            ["30", "30 days"],
-            ["custom", "Custom range"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              className={range === key ? "selected" : ""}
-              aria-pressed={range === key}
-              onClick={() => setRange(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <button
-          className="secondary-button"
-          onClick={() => setRefresh((v) => v + 1)}
+        <Badge>
+          {data.source} · {filtered.length} readings
+        </Badge>
+        <select
+          aria-label="Analytics range"
+          value={range}
+          onChange={(e) => setRange(e.target.value)}
         >
-          <Icon name="refresh" size={15} /> Refresh
-        </button>
+          <option value="all">All available readings</option>
+          <option value="recent">Recent 100 readings</option>
+          <option value="custom">Custom range</option>
+        </select>
       </div>
       {range === "custom" && (
         <div className="custom-range">
           <label>
-            From
+            From {timed ? "timestamp" : "reading index"}
             <input
-              aria-label="Analytics from date"
-              type="date"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
+              aria-label="Range from"
+              type={timed ? "datetime-local" : "number"}
+              min="1"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
             />
           </label>
           <label>
-            To
+            To {timed ? "timestamp" : "reading index"}
             <input
-              aria-label="Analytics to date"
-              type="date"
-              value={end}
-              onChange={(e) => setEnd(e.target.value)}
+              aria-label="Range to"
+              type={timed ? "datetime-local" : "number"}
+              min="1"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
             />
           </label>
         </div>
       )}
-      <div className="analytics-summary">
-        <Badge tone={mode === "demo" ? "amber" : ""}>
-          {mode === "demo"
-            ? "Synthetic historical data"
-            : "Historical backend data"}
-        </Badge>
-        <span>
-          {loading
-            ? "Loading…"
-            : `${result.history.length} sensor samples in this selection`}
-        </span>
-      </div>
-      {error && (
-        <p className="form-error inset" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="analytics-grid">
-        {sensors.map((s) => (
+      <Trends history={filtered} />
+      <div className="analytics-grid spaced">
+        {[
+          "Vibration Analysis",
+          "Temperature Monitoring",
+          "Electrical Monitoring",
+        ].map((group) => {
+          const ms = measurements.filter(
+            (p) => p.group === group && p.unit !== "",
+          );
+          return (
+            <HistoryChart
+              key={group}
+              title={group}
+              data={filtered}
+              unit={ms[0].unit}
+              series={ms.map((p) => ({
+                key: p.key,
+                label: p.name,
+                color: p.color,
+              }))}
+            />
+          );
+        })}
+        <Panel
+          title="Parameter distribution"
+          action={
+            <select
+              aria-label="Distribution parameter"
+              value={parameter}
+              onChange={(e) => setParameter(e.target.value)}
+            >
+              {measurements.map((p) => (
+                <option value={p.key} key={p.key}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          }
+        >
           <HistoryChart
-            key={s.id}
-            title={`${s.name} history`}
-            data={result.history}
-            series={s.channels}
-            unit={s.unit}
-          />
-        ))}
-        <HistoryChart
-          title="Health-score history"
-          data={result.healthHistory}
-          series={[
-            { key: "health_score", label: "Health score", color: "#49dab7" },
-          ]}
-          domain={[0, 100]}
-          unit="%"
-        />
-        <div>
-          <HistoryChart
-            title="Fault classification history"
-            data={result.classificationHistory}
-            series={[
-              { key: "fault_class", label: "Fault class", color: "#c397fa" },
-            ]}
-            domain={[0, 3]}
+            title={`${m.name} bins (${m.unit || "dimensionless"})`}
+            data={histogram(filtered.map((r) => r[parameter]))}
+            series={[{ key: "count", label: "Readings", color: m.color }]}
+            kind="bar"
+            xKey="bucket"
             step
           />
-          <p className="classification-key">
-            0 Normal · 1 Minor Fault · 2 Moderate Fault · 3 Severe Fault
-          </p>
+        </Panel>
+      </div>
+      <Panel title="Parameter correlation">
+        <p className="settings-note">
+          Pearson correlation on available numeric pairs. Missing/constant pairs
+          are unavailable; correlation does not establish causation.
+        </p>
+        <div className="table-wrap">
+          <table className="correlation-table">
+            <thead>
+              <tr>
+                <th>Feature</th>
+                {measurements.map((m) => (
+                  <th key={m.key} title={m.name}>
+                    {m.key}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {measurements.map((a, i) => (
+                <tr key={a.key}>
+                  <th>{a.key}</th>
+                  {matrix[i].map((n, j) => (
+                    <td
+                      key={j}
+                      style={{
+                        background:
+                          n == null
+                            ? "transparent"
+                            : `rgba(${n >= 0 ? "73,218,183" : "239,113,133"},${Math.abs(n) * 0.3})`,
+                      }}
+                    >
+                      {n == null ? "N/A" : n.toFixed(2)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+      </Panel>
+      <div className="overview-stats spaced">
+        <div>
+          <span>Normal readings</span>
+          <strong>
+            {results.length
+              ? results.filter((r) => r.status === "normal").length
+              : "Not available"}
+          </strong>
+        </div>
+        <div>
+          <span>Anomalous readings</span>
+          <strong>
+            {results.length
+              ? results.filter((r) => r.status === "anomaly").length
+              : "Not available"}
+          </strong>
+        </div>
+        <div>
+          <span>Readings without model results</span>
+          <strong>{filtered.length - results.length}</strong>
+        </div>
+      </div>
+      <div className="analytics-grid">
         <HistoryChart
-          title="Alert frequency"
-          data={alertCounts}
-          series={[{ key: "count", label: "Alerts per day", color: "#edb16a" }]}
+          title="Isolation Forest anomaly score distribution"
+          data={histogram(results.map((r) => r.anomaly_score))}
+          series={[{ key: "count", label: "Model results", color: "#c397fa" }]}
           kind="bar"
-          domain={[0, "auto"]}
+          xKey="bucket"
           step
         />
         <HistoryChart
-          title="Maintenance activity"
-          data={maintenanceCounts}
+          title="Anomaly score trend"
+          data={history}
           series={[
-            { key: "count", label: "Records per day", color: "#76a7ff" },
+            { key: "anomaly_score", label: "Anomaly score", color: "#edb16a" },
           ]}
-          kind="bar"
-          domain={[0, "auto"]}
+        />
+        <HistoryChart
+          title="Normal / anomalous trend"
+          data={history}
+          series={[
+            {
+              key: "anomalous",
+              label: "0 Normal / 1 Anomaly Detected",
+              color: "#49dab7",
+            },
+          ]}
+          domain={[0, 1]}
           step
         />
       </div>

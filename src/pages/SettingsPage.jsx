@@ -1,297 +1,194 @@
-import { useEffect, useState } from "react";
-import { Panel, Icon } from "../components/ui";
-import { measurements } from "../data/config";
-import { validateSettings } from "../services/settings";
+import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-const pages = [
-  ["home", "Home"],
-  ["sensors", "Live Sensor Data"],
-  ["health", "Health Score"],
-  ["twin", "Digital Twin"],
-  ["alerts", "Alert Feed"],
-  ["maintenance", "Maintenance Log"],
-  ["analytics", "Analytics"],
-];
-export default function SettingsPage({ settings, onSave, demo, loadError }) {
+import { Panel } from "../components/ui";
+import { measurements, sourceNames } from "../data/config";
+export default function SettingsPage({ settings, onSave, mode, onMode, user }) {
+  const { update } = useAuth();
+  const [profileName, setProfileName] = useState(user.name);
   const [draft, setDraft] = useState(() => structuredClone(settings)),
-    [error, setError] = useState(""),
     [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false);
-  const { user, update } = useAuth();
-  const [profile, setProfile] = useState({
-      name: user.name,
-      email: user.email,
-    }),
-    [profileMessage, setProfileMessage] = useState(""),
-    [profileError, setProfileError] = useState("");
-  useEffect(() => {
-    setDraft(structuredClone(settings));
-  }, [settings]);
+    [error, setError] = useState("");
+  function set(section, key, value) {
+    setDraft((v) => ({ ...v, [section]: { ...v[section], [key]: value } }));
+  }
   async function save(e) {
     e.preventDefault();
-    setError("");
     setMessage("");
-    setBusy(true);
+    setError("");
     try {
-      validateSettings(draft);
       await onSave(draft);
-      setMessage(
-        demo
-          ? "Monitoring settings saved locally for this demo account."
-          : "Monitoring settings saved.",
-      );
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  const toggle = (group, key) =>
-    setDraft((v) => ({
-      ...v,
-      [group]: { ...v[group], [key]: !v[group][key] },
-    }));
-  const threshold = (key, field, value) =>
-    setDraft((v) => ({
-      ...v,
-      thresholds: {
-        ...v.thresholds,
-        [key]: {
-          ...v.thresholds[key],
-          [field]: value === "" ? null : Number(value),
-        },
-      },
-    }));
-  async function saveProfile(e) {
-    e.preventDefault();
-    setProfileMessage("");
-    setProfileError("");
-    if (!profile.name.trim()) {
-      setProfileError("Full name is required.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await update(profile);
-      setProfileMessage("Profile saved.");
-    } catch (err) {
-      setProfileError(err.message);
-    } finally {
-      setBusy(false);
+      if (profileName.trim() !== user.name)
+        await update({ name: profileName.trim(), email: user.email });
+      setMessage("Monitoring preferences saved in this browser.");
+    } catch (e) {
+      setError(e.message);
     }
   }
   return (
-    <>
-      <form onSubmit={save}>
-        <Panel
-          title="Threshold Configuration"
-          action={
-            <span className="muted">Upper limits · blank means unset</span>
-          }
-        >
-          <p className="settings-note">
-            Configure limits for displayed readings. These limits do not replace
-            the Random Forest classification or calculate a health score.
-          </p>
-          <div className="table-wrap">
-            <table className="threshold-table">
-              <thead>
-                <tr>
-                  <th>Measurement</th>
-                  <th>Unit</th>
-                  <th>Warning at or above</th>
-                  <th>Critical at or above</th>
-                </tr>
-              </thead>
-              <tbody>
-                {measurements.map((m) => (
-                  <tr key={m.key}>
-                    <td>{m.name}</td>
-                    <td>{m.unit}</td>
-                    <td>
-                      <input
-                        type="number"
-                        step="any"
-                        aria-label={`${m.name} warning threshold`}
-                        placeholder="Not set"
-                        value={draft.thresholds[m.key].warningHigh ?? ""}
-                        onChange={(e) =>
-                          threshold(m.key, "warningHigh", e.target.value)
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        step="any"
-                        aria-label={`${m.name} critical threshold`}
-                        placeholder="Not set"
-                        value={draft.thresholds[m.key].criticalHigh ?? ""}
-                        onChange={(e) =>
-                          threshold(m.key, "criticalHigh", e.target.value)
-                        }
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-        <div className="settings-grid">
-          <Panel title="Alert preferences">
-            <div className="settings-options">
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={draft.alerts.warning}
-                  onChange={() => toggle("alerts", "warning")}
-                />
-                Show warning alerts on Home
-              </label>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={draft.alerts.critical}
-                  onChange={() => toggle("alerts", "critical")}
-                />
-                Show critical alerts on Home
-              </label>
-              <p className="muted">
-                The Alert Feed always retains all received alerts.
-              </p>
-            </div>
-          </Panel>
-          <Panel title="Notification settings">
-            <div className="settings-options">
-              {[
-                ["email", "Email"],
-                ["sms", "SMS"],
-                ["whatsapp", "WhatsApp"],
-              ].map(([key, label]) => (
-                <label key={key} className="check-label">
-                  <input
-                    type="checkbox"
-                    checked={draft.notifications[key]}
-                    onChange={() => toggle("notifications", key)}
-                  />
-                  {label} notifications
-                </label>
+    <form onSubmit={save} className="settings-stack">
+      <Panel title="Data source and live connection">
+        <div className="form-grid inset">
+          <label>
+            Data source
+            <select value={mode} onChange={(e) => onMode(e.target.value)}>
+              {Object.entries(sourceNames).map(([k, n]) => (
+                <option key={k} value={k}>
+                  {n}
+                </option>
               ))}
-              <p className="muted">
-                {demo
-                  ? "Preferences only in demo mode. No messages are sent."
-                  : "The backend manages notification delivery and verified recipients."}
-              </p>
-            </div>
-          </Panel>
-          <Panel title="Dashboard preferences">
-            <div className="settings-options">
-              <label>
-                Preferred starting page
-                <select
-                  value={draft.dashboard.defaultPage}
-                  onChange={(e) =>
-                    setDraft((v) => ({
-                      ...v,
-                      dashboard: {
-                        ...v.dashboard,
-                        defaultPage: e.target.value,
-                      },
-                    }))
-                  }
-                >
-                  {pages.map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={draft.dashboard.compact}
-                  onChange={() => toggle("dashboard", "compact")}
-                />
-                Compact dashboard spacing
-              </label>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={draft.dashboard.symbolicEffect}
-                  onChange={() => toggle("dashboard", "symbolicEffect")}
-                />
-                Symbolic critical effect in the 3D view
-              </label>
-            </div>
-          </Panel>
+            </select>
+          </label>
+          <label>
+            Backend URL
+            <input
+              required
+              type="url"
+              value={draft.connection.apiBase}
+              onChange={(e) => set("connection", "apiBase", e.target.value)}
+            />
+          </label>
+          <label>
+            WebSocket URL (optional)
+            <input
+              value={draft.connection.wsUrl}
+              placeholder="ws://localhost:5000/stream"
+              onChange={(e) => set("connection", "wsUrl", e.target.value)}
+            />
+          </label>
+          <label>
+            Refresh interval (milliseconds)
+            <input
+              type="number"
+              min="1000"
+              max="60000"
+              step="100"
+              value={draft.connection.pollMs}
+              onChange={(e) =>
+                set("connection", "pollMs", Number(e.target.value))
+              }
+            />
+          </label>
         </div>
-        {(error || loadError) && (
-          <p role="alert" className="form-error inset">
-            {error || loadError}
-          </p>
-        )}
-        {message && (
-          <p role="status" className="form-success inset">
-            {message}
-          </p>
-        )}
-        <div className="settings-save">
-          <span>
-            {demo
-              ? "Saved in this browser · demo account"
-              : "Saved to the monitoring backend"}
-          </span>
-          <button className="primary-button" disabled={busy}>
-            <Icon name="check" />{" "}
-            {busy ? "Saving…" : "Save monitoring settings"}
-          </button>
-        </div>
-      </form>
-      <Panel title="Account / profile">
-        <form className="profile-form" onSubmit={saveProfile}>
-          <div className="form-grid">
-            <label>
-              Full name
-              <input
-                required
-                maxLength={80}
-                value={profile.name}
-                onChange={(e) =>
-                  setProfile((v) => ({ ...v, name: e.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Email
-              <input
-                required
-                type="email"
-                maxLength={150}
-                readOnly={user.id === "demo-staff"}
-                value={profile.email}
-                onChange={(e) =>
-                  setProfile((v) => ({ ...v, email: e.target.value }))
-                }
-              />
-            </label>
-          </div>
-          {profileError && (
-            <p className="form-error" role="alert">
-              {profileError}
-            </p>
-          )}
-          {profileMessage && (
-            <p className="form-success" role="status">
-              {profileMessage}
-            </p>
-          )}
-          <button className="secondary-button" disabled={busy}>
-            Save profile
-          </button>
-        </form>
       </Panel>
-    </>
+      <Panel title="Model configuration">
+        <label className="inset checkbox">
+          <input
+            type="checkbox"
+            checked={draft.model.enabled}
+            onChange={(e) => set("model", "enabled", e.target.checked)}
+          />{" "}
+          Connect Isolation Forest inference endpoint
+        </label>
+        <p className="inset muted">
+          Requires the trained model and its preprocessing pipeline at
+          /api/model/predict. No inference or training runs in this frontend.
+          Demo mode does not request predictions.
+        </p>
+      </Panel>
+      <Panel title="Visible sensor parameters">
+        <div className="parameter-picker inset">
+          {measurements.map((m) => (
+            <label key={m.key}>
+              <input
+                type="checkbox"
+                checked={draft.parameters.includes(m.key)}
+                onChange={(e) =>
+                  setDraft((v) => ({
+                    ...v,
+                    parameters: e.target.checked
+                      ? [...v.parameters, m.key]
+                      : v.parameters.filter((k) => k !== m.key),
+                  }))
+                }
+              />
+              {m.name}
+            </label>
+          ))}
+        </div>
+        <p className="inset muted">
+          Visibility preferences do not change model inputs.
+        </p>
+      </Panel>
+      <Panel title="Health indicator thresholds">
+        <p className="inset muted">
+          Optional project-defined colour bands for the backend health
+          indicator, not validated mechanical fault thresholds. Leave both blank
+          to disable bands.
+        </p>
+        <div className="form-grid inset">
+          {[
+            ["healthyMin", "Green minimum"],
+            ["warningMin", "Amber minimum"],
+          ].map(([key, label]) => (
+            <label key={key}>
+              {label}
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="any"
+                value={draft.health[key] ?? ""}
+                onChange={(e) =>
+                  set(
+                    "health",
+                    key,
+                    e.target.value === "" ? null : Number(e.target.value),
+                  )
+                }
+              />
+            </label>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Alert and dashboard preferences">
+        <div className="inset">
+          {[
+            [
+              "alerts",
+              "showAcknowledged",
+              "Show acknowledged alerts by default",
+            ],
+            ["dashboard", "compact", "Compact card spacing"],
+          ].map(([s, k, label]) => (
+            <label className="checkbox" key={k}>
+              <input
+                type="checkbox"
+                checked={draft[s][k]}
+                onChange={(e) => set(s, k, e.target.checked)}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Account">
+        <div className="form-grid inset">
+          <label>
+            Full name
+            <input
+              value={profileName}
+              required
+              maxLength={80}
+              onChange={(e) => setProfileName(e.target.value)}
+            />
+          </label>
+          <label>
+            Email
+            <input value={user.email} readOnly />
+          </label>
+        </div>
+      </Panel>
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      {message && (
+        <p role="status" className="form-success">
+          {message}
+        </p>
+      )}
+      <button className="primary-button">Save settings</button>
+    </form>
   );
 }

@@ -1,71 +1,74 @@
+import { FEATURE_KEYS } from "../data/config.js";
+import { featureRow } from "./dataset.js";
 export function validateReading(value) {
-  if (!value || !Number.isFinite(Date.parse(value.timestamp)))
-    throw new Error("Sensor response needs a valid timestamp.");
-  for (const key of [
-    "vibration_x",
-    "vibration_y",
-    "vibration_z",
-    "temperature",
-    "current",
-  ])
-    if (!Number.isFinite(value[key]))
-      throw new Error(`Sensor response needs numeric ${key}.`);
-  return value;
+  if (!value || typeof value !== "object") throw new Error("Invalid reading.");
+  return featureRow(
+    value,
+    Number.isInteger(value.reading_index) ? value.reading_index : 1,
+  );
 }
 export function validatePrediction(value) {
-  if (value == null) return null;
-  if (!Number.isFinite(Date.parse(value.timestamp)))
-    throw new Error("Prediction needs a valid timestamp.");
-  if (value.fault_class != null && ![0, 1, 2, 3].includes(value.fault_class))
-    throw new Error("Invalid fault class.");
   if (
-    value.health_score != null &&
-    (!Number.isFinite(value.health_score) ||
-      value.health_score < 0 ||
-      value.health_score > 100)
+    !value ||
+    value.algorithm !== "IsolationForest" ||
+    typeof value.model_version !== "string" ||
+    !value.model_version
   )
-    throw new Error("Invalid model health score.");
+    throw new Error("Expected a versioned Isolation Forest result.");
   if (
-    value.maintenance_hours != null &&
-    (!Number.isFinite(value.maintenance_hours) || value.maintenance_hours < 0)
+    !Number.isInteger(value.reading_index) ||
+    !["normal", "anomaly"].includes(value.status)
   )
-    throw new Error("Invalid maintenance window.");
-  return value;
+    throw new Error("Invalid anomaly result.");
+  if (
+    !Number.isFinite(value.anomaly_score) ||
+    !Number.isFinite(value.decision_threshold)
+  )
+    throw new Error("Model score and threshold are required.");
+  if (
+    value.health_indicator != null &&
+    (!Number.isFinite(value.health_indicator) ||
+      value.health_indicator < 0 ||
+      value.health_indicator > 100 ||
+      typeof value.health_mapping !== "string" ||
+      !value.health_mapping.trim())
+  )
+    throw new Error(
+      "A 0–100 indicator requires a backend-defined score mapping.",
+    );
+  return {
+    reading_index: value.reading_index,
+    algorithm: "IsolationForest",
+    model_version: value.model_version,
+    status: value.status,
+    anomaly_score: value.anomaly_score,
+    decision_threshold: value.decision_threshold,
+    health_indicator: value.health_indicator ?? null,
+    health_mapping: value.health_mapping ?? null,
+  };
 }
-export function validateRecords(value, kind) {
-  if (!Array.isArray(value))
-    throw new Error(`${kind} response must be an array.`);
-  return value.map((row) => {
-    if (
-      !row ||
-      typeof row.id !== "string" ||
-      typeof row.message !== "string" ||
-      !Number.isFinite(Date.parse(row.timestamp))
-    )
-      throw new Error(`Invalid ${kind} record.`);
-    for (const field of [
-      "source",
-      "condition",
-      "type",
-      "technician",
-      "notes",
-      "acknowledged_by",
-    ])
-      if (row[field] != null && typeof row[field] !== "string")
-        throw new Error(`Invalid ${kind} ${field}.`);
-    if (
-      kind === "alerts" &&
-      row.acknowledged != null &&
-      typeof row.acknowledged !== "boolean"
-    )
-      throw new Error("Invalid acknowledgement state.");
-    return row;
+export function validateModelBatch(response, datasetId, rows) {
+  if (response?.dataset_id !== datasetId || !Array.isArray(response.results))
+    throw new Error("Model result does not match the selected dataset.");
+  const allowed = new Set(
+    rows
+      .filter((r) => FEATURE_KEYS.every((k) => Number.isFinite(r[k])))
+      .map((r) => r.reading_index),
+  );
+  const seen = new Set();
+  return response.results.map((raw) => {
+    const r = validatePrediction(raw);
+    if (!allowed.has(r.reading_index) || seen.has(r.reading_index))
+      throw new Error("Unexpected or duplicate model reading index.");
+    seen.add(r.reading_index);
+    return r;
   });
 }
-export function validateSeries(value, kind) {
-  if (!Array.isArray(value)) throw new Error(`Invalid ${kind} history.`);
-  return value
-    .map(kind === "sensor" ? validateReading : validatePrediction)
-    .filter(Boolean)
-    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+export function validateRecords(rows) {
+  if (!Array.isArray(rows)) throw new Error("Expected record array.");
+  return rows.map((r) => {
+    if (typeof r.id !== "string" || typeof r.message !== "string")
+      throw new Error("Invalid record.");
+    return r;
+  });
 }

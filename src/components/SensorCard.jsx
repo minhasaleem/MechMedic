@@ -1,23 +1,8 @@
 import { ResponsiveContainer, LineChart, Line } from "recharts";
-import { readingState } from "../data/config";
-import { Badge, Icon, timeLabel } from "./ui";
-export function SensorCard({
-  measurement,
-  latest,
-  history,
-  demo,
-  stale,
-  threshold,
-}) {
-  const value = latest?.[measurement.key],
-    previous = history.at(-2)?.[measurement.key];
-  const state = stale
-    ? { label: "Stale data", tone: "amber" }
-    : readingState(value, threshold);
-  const delta =
-    Number.isFinite(value) && Number.isFinite(previous)
-      ? value - previous
-      : null;
+import { Badge, Icon } from "./ui";
+import { readingLabel } from "../services/dataset";
+export function SensorCard({ measurement, latest, history, source, stale }) {
+  const value = latest?.[measurement.key];
   return (
     <section
       className="sensor-card"
@@ -32,36 +17,36 @@ export function SensorCard({
       <div className="sensor-value">
         <div>
           <strong>
-            {value == null
-              ? "—"
-              : value.toFixed(measurement.id === "temperature" ? 1 : 3)}
+            {Number.isFinite(value)
+              ? Number(value.toFixed(4))
+              : "Not available"}
           </strong>
-          <span>{measurement.unit}</span>
+          <span>{measurement.unit || "dimensionless"}</span>
         </div>
       </div>
-      <div className="measurement-meta">
-        <Badge tone={state.tone}>{state.label}</Badge>
-        <span>
-          {delta == null ? "—" : `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}`}{" "}
-          {measurement.unit}
-        </span>
-      </div>
+      <Badge tone={stale ? "amber" : ""}>
+        {stale
+          ? "Stale / unverified freshness"
+          : measurement.derived
+            ? "Derived feature"
+            : "Dataset parameter"}
+      </Badge>
       <div className="sparkline" aria-hidden="true">
         <ResponsiveContainer width="100%" height={40}>
-          <LineChart data={history.slice(-45)}>
+          <LineChart data={history.slice(-100)}>
             <Line
               dataKey={measurement.key}
               stroke={measurement.color}
-              strokeWidth={1.6}
               dot={false}
               isAnimationActive={false}
+              connectNulls={false}
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
       <div className="sensor-footer">
-        <span>{timeLabel(latest?.timestamp)}</span>
-        <span>{demo ? "DEMO" : measurement.model}</span>
+        <span>{readingLabel(latest)}</span>
+        <span>{source}</span>
       </div>
     </section>
   );
